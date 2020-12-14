@@ -10,12 +10,6 @@ import tensorflow as tf
 # Criação da arquitetura da rede neural
 
 
-def loss(actual, predict):
-    predMean = tf.math.reduce_mean(predict)
-    m3 = actual + predMean
-    return tf.math.reduce_mean(m3 - predMean)
-
-
 class Network():
     def __init__(self, input_size, nb_action):
         self.input_size = input_size
@@ -26,9 +20,9 @@ class Network():
         self.model.add(tf.keras.layers.Dense(
             30, activation='tanh', input_shape=(self.input_size,)))
         self.model.add(tf.keras.layers.Dense(
-            self.nb_action, activation='softmax'))
+            self.nb_action, activation='linear'))
         # compila a rede
-        self.model.compile(optimizer='adam', loss=loss, metrics=[
+        self.model.compile(optimizer='adam', loss='mse', metrics=[
                            'mean_squared_error'])
         self.model.summary()
 
@@ -77,32 +71,36 @@ class Dqn():
 
     def select_action(self, state):
         # softmax(1,2,3) -> (0.04, 0.11, 0.85) -> (0, 0.02, 0.98)
-        probabilities = self.softmax(self.model.forward(state) * 100)
+        probabilities = self.softmax(self.model.forward(state) * 10)
         # escolhe a ação com base em uma probabilidade
         action = np.random.choice(range(len(probabilities)), p=probabilities)
         return action
 
     def learn(self, batch_state, batch_next_state, batch_reward, batch_action):
 
-        outputs = self.model.model.predict(batch_state,)
-        outputs = np.max(np.take_along_axis(outputs, np.expand_dims(
-            batch_action, axis=1), axis=1), axis=1)
+        # calcula o score para o proximo estado
         next_outputs = self.model.model.predict(batch_next_state,)
         next_outputs = np.max(next_outputs, axis=1)
 
-        target = self.gamma * next_outputs + batch_reward
-        error = np.square(outputs - target)
-        self.model.model.fit((batch_state,), (error,), epochs=1)
+        reward = self.gamma * next_outputs + batch_reward
+        # calcula a saida para o estado atual
+        outputs = self.model.model.predict(batch_state,)
+        # relaciona a saida do proximo estado com o estado atual
+        np.put_along_axis(outputs, np.expand_dims(
+            batch_action, axis=1), np.expand_dims(reward, axis=1), axis=1)
+
+        self.model.model.fit((batch_state,), (outputs,),
+                             epochs=5, verbose=False)
 
     def update(self, reward, new_state):
         self.updateCount = self.updateCount + 1
         self.memory.push((self.last_state, new_state,
                           self.last_reward, int(self.last_action)))
         action = self.select_action(new_state)
-        if (self.updateCount > 20 and len(self.memory.memory) > 100):
+        if (self.updateCount > 20 and len(self.memory.memory) > 300):
             self.updateCount = 0
             batch_state, batch_next_state, batch_reward, batch_action = self.memory.sample(
-                100)
+                300)
             self.learn(batch_state, batch_next_state,
                        batch_reward, batch_action)
         self.last_action = action
